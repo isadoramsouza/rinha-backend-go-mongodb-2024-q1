@@ -50,7 +50,7 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 		newBalance = c.Saldo - int64(t.Valor)
 	}
 
-	if newBalance < 0 {
+	if (newBalance + int64(c.Limite)) < 0 {
 		return domain.TransacaoResponse{}, LimitErr
 	}
 
