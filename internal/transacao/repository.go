@@ -9,7 +9,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
@@ -92,18 +91,15 @@ func (r *repository) GetBalance(ctx context.Context, id int) (domain.Cliente, er
 }
 
 func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, error) {
-	cliente, err := r.GetBalance(ctx, id)
-	if err != nil {
-		return domain.Extrato{}, err
+	pipeline := bson.A{
+		bson.D{{"$match", bson.M{"cliente_id": id}}},
+		bson.D{{"$sort", bson.M{"realizada_em": -1}}},
+		bson.D{{"$limit", 10}},
 	}
 
 	transacaoCollection := r.db.Database(DB_NAME).Collection("transacoes")
 
-	filter := bson.M{"cliente_id": id}
-
-	options := options.Find().SetSort(bson.D{{"realizada_em", -1}}).SetLimit(10)
-
-	cur, err := transacaoCollection.Find(ctx, filter, options)
+	cur, err := transacaoCollection.Aggregate(ctx, pipeline)
 	if err != nil {
 		return domain.Extrato{}, err
 	}
@@ -121,6 +117,11 @@ func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, er
 	}
 
 	if err := cur.Err(); err != nil {
+		return domain.Extrato{}, err
+	}
+
+	cliente, err := r.GetBalance(ctx, id)
+	if err != nil {
 		return domain.Extrato{}, err
 	}
 

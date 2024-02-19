@@ -67,6 +67,7 @@ services:
 
   db:
     image: mongo:7-jammy
+    command: mongod --quiet --logpath /dev/null
     hostname: db
     network_mode: "host"
     volumes:
