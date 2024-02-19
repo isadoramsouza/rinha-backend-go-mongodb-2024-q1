@@ -35,24 +35,12 @@ func NewRepository(db *mongo.Client) Repository {
 }
 
 func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error) {
-	session, err := r.db.StartSession()
-	if err != nil {
-		return domain.TransacaoResponse{}, err
-	}
-	defer session.EndSession(ctx)
-
-	err = session.StartTransaction()
-	if err != nil {
-		return domain.TransacaoResponse{}, err
-	}
-
 	transacaoCollection := r.db.Database(DB_NAME).Collection("transacoes")
 	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
 
 	var c domain.Cliente
-	err = clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
+	err := clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
 	if err != nil {
-		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, err
 	}
 
@@ -64,13 +52,11 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	}
 
 	if newBalance < 0 {
-		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, LimitErr
 	}
 
 	_, err = clienteCollection.UpdateOne(ctx, bson.M{"id": t.ClienteID}, bson.M{"$set": bson.M{"saldo": newBalance}})
 	if err != nil {
-		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, err
 	}
 
@@ -81,12 +67,6 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 		"descricao":    t.Descricao,
 		"realizada_em": primitive.NewDateTimeFromTime(time.Now().UTC()),
 	})
-	if err != nil {
-		session.AbortTransaction(ctx)
-		return domain.TransacaoResponse{}, err
-	}
-
-	err = session.CommitTransaction(ctx)
 	if err != nil {
 		return domain.TransacaoResponse{}, err
 	}
