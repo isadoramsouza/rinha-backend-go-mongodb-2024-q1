@@ -8,6 +8,7 @@ import (
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
@@ -36,31 +37,34 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	transacaoCollection := r.db.Database(DB_NAME).Collection("transacoes")
 	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
 
-	// Busca o cliente para verificar seu saldo atual e limite disponível
-	var c domain.Cliente
-	err := clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
-	if err != nil {
-		return domain.TransacaoResponse{}, err
+	// Define as opções para retornar o documento após a atualização
+	options := options.FindOneAndUpdate().SetReturnDocument(options.After)
+
+	// Define o filtro para encontrar o cliente
+	filter := bson.M{"id": t.ClienteID}
+
+	// Define a atualização com base no tipo de transação
+	var update bson.M
+	if t.Tipo == "c" {
+		update = bson.M{
+			"$inc": bson.M{"saldo": t.Valor},
+		}
+	} else {
+		update = bson.M{
+			"$inc": bson.M{"saldo": -t.Valor},
+		}
 	}
 
-	// Calcula o novo saldo com base no tipo de transação
-	var newBalance int64
-	if t.Tipo == "c" {
-		newBalance = c.Saldo + int64(t.Valor)
-	} else {
-		newBalance = c.Saldo - int64(t.Valor)
+	// Realiza a atualização atômica do saldo do cliente e retorna o documento atualizado
+	var updatedCliente domain.Cliente
+	err := clienteCollection.FindOneAndUpdate(ctx, filter, update, options).Decode(&updatedCliente)
+	if err != nil {
+		return domain.TransacaoResponse{}, err
 	}
 
 	// Verifica se a transação viola a restrição do limite disponível
-	if t.Tipo == "d" && (newBalance < -c.Limite) {
+	if t.Tipo == "d" && (updatedCliente.Saldo < -updatedCliente.Limite) {
 		return domain.TransacaoResponse{}, LimitErr
-	}
-
-	// Atualiza o saldo do cliente e insere a transação em uma única operação de banco de dados
-	update := bson.M{"$set": bson.M{"saldo": newBalance}}
-	_, err = clienteCollection.UpdateOne(ctx, bson.M{"id": t.ClienteID}, update)
-	if err != nil {
-		return domain.TransacaoResponse{}, err
 	}
 
 	// Insere a transação na coleção de transações
@@ -71,8 +75,8 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 
 	// Retorna a resposta da transação
 	response := domain.TransacaoResponse{
-		Saldo:  newBalance,
-		Limite: c.Limite,
+		Saldo:  updatedCliente.Saldo,
+		Limite: updatedCliente.Limite,
 	}
 
 	return response, nil
