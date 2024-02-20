@@ -3,12 +3,13 @@ package transacao
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
@@ -16,6 +17,8 @@ var (
 	LimitErr    = errors.New("limit error")
 	DB_NAME     = "rinhabackenddb"
 )
+
+var mutex sync.Mutex
 
 type Repository interface {
 	SaveTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error)
@@ -37,46 +40,49 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	transacaoCollection := r.db.Database(DB_NAME).Collection("transacoes")
 	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
 
-	// Define as opções para retornar o documento após a atualização
-	options := options.FindOneAndUpdate().SetReturnDocument(options.After)
-
-	// Define o filtro para encontrar o cliente
-	filter := bson.M{"id": t.ClienteID}
-
-	// Define a atualização com base no tipo de transação
-	var update bson.M
-	if t.Tipo == "c" {
-		update = bson.M{
-			"$inc": bson.M{"saldo": t.Valor},
-		}
-	} else {
-		update = bson.M{
-			"$inc": bson.M{"saldo": -t.Valor},
-		}
-	}
-
-	// Realiza a atualização atômica do saldo do cliente e retorna o documento atualizado
-	var updatedCliente domain.Cliente
-	err := clienteCollection.FindOneAndUpdate(ctx, filter, update, options).Decode(&updatedCliente)
+	var c domain.Cliente
+	err := clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
 	if err != nil {
 		return domain.TransacaoResponse{}, err
 	}
 
-	// Verifica se a transação viola a restrição do limite disponível
-	if t.Tipo == "d" && (updatedCliente.Saldo < -updatedCliente.Limite) {
+	// Bloqueia exclusão mútua para garantir que apenas uma goroutine possa modificar o cliente de cada vez
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	// Verifica se a transação ultrapassa o limite disponível
+	var newBalance int64
+	if t.Tipo == "c" {
+		newBalance = c.Saldo + int64(t.Valor)
+	} else {
+		newBalance = c.Saldo - int64(t.Valor)
+	}
+
+	if (newBalance + c.Limite) < 0 {
 		return domain.TransacaoResponse{}, LimitErr
 	}
 
-	// Insere a transação na coleção de transações
-	_, err = transacaoCollection.InsertOne(ctx, t)
+	// Atualiza o saldo do cliente
+	_, err = clienteCollection.UpdateOne(ctx, bson.M{"id": t.ClienteID}, bson.M{"$set": bson.M{"saldo": newBalance}})
 	if err != nil {
 		return domain.TransacaoResponse{}, err
 	}
 
-	// Retorna a resposta da transação
+	// Insere a transação na coleção de transações
+	_, err = transacaoCollection.InsertOne(ctx, bson.M{
+		"cliente_id":   t.ClienteID,
+		"valor":        t.Valor,
+		"tipo":         t.Tipo,
+		"descricao":    t.Descricao,
+		"realizada_em": primitive.NewDateTimeFromTime(time.Now().UTC()),
+	})
+	if err != nil {
+		return domain.TransacaoResponse{}, err
+	}
+
 	response := domain.TransacaoResponse{
-		Saldo:  updatedCliente.Saldo,
-		Limite: updatedCliente.Limite,
+		Saldo:  newBalance,
+		Limite: c.Limite,
 	}
 
 	return response, nil
