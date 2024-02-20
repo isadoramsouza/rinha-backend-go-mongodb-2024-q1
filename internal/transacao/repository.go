@@ -37,20 +37,27 @@ func NewRepository(db *mongo.Client) Repository {
 }
 
 func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error) {
-	transacaoCollection := r.db.Database(DB_NAME).Collection("transacoes")
-	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
+	session, err := r.db.StartSession()
+	if err != nil {
+		return domain.TransacaoResponse{}, err
+	}
+	defer session.EndSession(ctx)
 
-	var c domain.Cliente
-	err := clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
+	err = session.StartTransaction()
 	if err != nil {
 		return domain.TransacaoResponse{}, err
 	}
 
-	// Bloqueia exclusão mútua para garantir que apenas uma goroutine possa modificar o cliente de cada vez
-	mutex.Lock()
-	defer mutex.Unlock()
+	transacaoCollection := r.db.Database(DB_NAME).Collection("transacoes")
+	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
 
-	// Verifica se a transação ultrapassa o limite disponível
+	var c domain.Cliente
+	err = clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
+	if err != nil {
+		session.AbortTransaction(ctx)
+		return domain.TransacaoResponse{}, err
+	}
+
 	var newBalance int64
 	if t.Tipo == "c" {
 		newBalance = c.Saldo + int64(t.Valor)
@@ -59,16 +66,16 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	}
 
 	if (newBalance + c.Limite) < 0 {
+		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, LimitErr
 	}
 
-	// Atualiza o saldo do cliente
 	_, err = clienteCollection.UpdateOne(ctx, bson.M{"id": t.ClienteID}, bson.M{"$set": bson.M{"saldo": newBalance}})
 	if err != nil {
+		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, err
 	}
 
-	// Insere a transação na coleção de transações
 	_, err = transacaoCollection.InsertOne(ctx, bson.M{
 		"cliente_id":   t.ClienteID,
 		"valor":        t.Valor,
@@ -77,14 +84,18 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 		"realizada_em": primitive.NewDateTimeFromTime(time.Now().UTC()),
 	})
 	if err != nil {
+		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, err
 	}
 
+	err = session.CommitTransaction(ctx)
+	if err != nil {
+		return domain.TransacaoResponse{}, err
+	}
 	response := domain.TransacaoResponse{
 		Saldo:  newBalance,
 		Limite: c.Limite,
 	}
-
 	return response, nil
 }
 
