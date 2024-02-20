@@ -140,14 +140,12 @@ func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, er
 		}},
 	}
 
-	// Executa a agregação
 	cursor, err := r.db.Database(DB_NAME).Collection("clientes").Aggregate(ctx, pipeline)
 	if err != nil {
 		return domain.Extrato{}, err
 	}
 	defer cursor.Close(ctx)
 
-	// Decodifica o resultado da agregação
 	var extrato struct {
 		Extrato domain.Extrato `bson:"extrato"`
 	}
@@ -158,7 +156,7 @@ func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, er
 		}
 	}
 
-	// Se não houver resultados, retorna um Extrato com os valores padrão
+	// Simplified check for result presence
 	if extrato.Extrato.UltimasTransacoes == nil {
 		return domain.Extrato{
 			Saldo: domain.Saldo{

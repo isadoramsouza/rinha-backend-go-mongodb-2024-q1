@@ -32,11 +32,10 @@ func main() {
 	fmt.Println("Connected to MongoDB!")
 
 	clientesCollection := db.Database(DB_NAME).Collection("clientes")
-	transacaoCollection := db.Database(DB_NAME).Collection("transacoes")
-	clientesCollection.Indexes().CreateOne(context.TODO(), mongo.IndexModel{Keys: bson.D{{"id", 1}}})
-	transacaoCollection.Indexes().
-		CreateOne(context.TODO(), mongo.IndexModel{Keys: bson.D{{"cliente_id", 1}, {"realizada_em", 1}}})
-
+	clientesCollection.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.M{"id": 1}},
+		{Keys: bson.M{"ultimas_transacoes.realizada_em": -1}},
+	})
 	eng := gin.Default()
 
 	router := routes.NewRouter(eng, db)
