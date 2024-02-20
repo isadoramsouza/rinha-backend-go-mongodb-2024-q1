@@ -8,6 +8,7 @@ import (
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
@@ -36,26 +37,27 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	transacaoCollection := r.db.Database(DB_NAME).Collection("transacoes")
 	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
 
-	var c domain.Cliente
-	err := clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
-	if err != nil {
-		return domain.TransacaoResponse{}, err
-	}
-
-	var newBalance int64
+	var update bson.M
 	if t.Tipo == "c" {
-		newBalance = c.Saldo + int64(t.Valor)
+		update = bson.M{
+			"$inc": bson.M{"saldo": t.Valor},
+		}
 	} else {
-		newBalance = c.Saldo - int64(t.Valor)
+		update = bson.M{
+			"$inc": bson.M{"saldo": -t.Valor},
+		}
 	}
 
-	if (newBalance + int64(c.Limite)) < 0 {
-		return domain.TransacaoResponse{}, LimitErr
-	}
-
-	_, err = clienteCollection.UpdateOne(ctx, bson.M{"id": t.ClienteID}, bson.M{"$set": bson.M{"saldo": newBalance}})
+	options := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	var updatedCliente domain.Cliente
+	err := clienteCollection.FindOneAndUpdate(ctx, bson.M{"id": t.ClienteID}, update, options).Decode(&updatedCliente)
 	if err != nil {
 		return domain.TransacaoResponse{}, err
+	}
+
+	newBalance := updatedCliente.Saldo
+	if (newBalance + int64(updatedCliente.Limite)) < 0 {
+		return domain.TransacaoResponse{}, LimitErr
 	}
 
 	_, err = transacaoCollection.InsertOne(ctx, t)
@@ -65,7 +67,7 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 
 	response := domain.TransacaoResponse{
 		Saldo:  newBalance,
-		Limite: c.Limite,
+		Limite: updatedCliente.Limite,
 	}
 
 	return response, nil
