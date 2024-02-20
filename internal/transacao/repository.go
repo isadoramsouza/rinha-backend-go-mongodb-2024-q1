@@ -22,7 +22,6 @@ var mutex sync.Mutex
 
 type Repository interface {
 	SaveTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error)
-	GetBalance(ctx context.Context, id int) (domain.Cliente, error)
 	GetExtrato(ctx context.Context, id int) (domain.Extrato, error)
 }
 
@@ -103,19 +102,10 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	return response, nil
 }
 
-func (r *repository) GetBalance(ctx context.Context, id int) (domain.Cliente, error) {
-	collection := r.db.Database(DB_NAME).Collection("clientes")
-
-	var c domain.Cliente
-	err := collection.FindOne(ctx, bson.M{"id": id}).Decode(&c)
-	if err != nil {
-		return domain.Cliente{}, err
-	}
-
-	return c, nil
-}
-
 func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, error) {
+	// Define a data do extrato
+	dataExtrato := time.Now().UTC()
+
 	// Define a pipeline de agregação para buscar as últimas transações e informações do cliente
 	pipeline := []bson.M{
 		{"$match": bson.M{"id": id}},
@@ -129,13 +119,13 @@ func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, er
 		{"$project": bson.M{
 			"saldo": bson.M{
 				"total":        "$cliente.saldo",
-				"data_extrato": bson.M{"$toDate": time.Now().UTC().Format(time.RFC3339)},
+				"data_extrato": bson.M{"$toDate": dataExtrato},
 				"limite":       "$cliente.limite",
 			},
 			"ultimas_transacoes": "$cliente.ultimas_transacoes",
 		}},
-		{"$unwind": "$ultimas_transacoes"},                       // Unwind das transações
-		{"$sort": bson.M{"ultimas_transacoes.realizada_em": -1}}, // Ordenar as transações por data em ordem decrescente
+		{"$unwind": bson.M{"path": "$ultimas_transacoes", "preserveNullAndEmptyArrays": true}}, // Unwind das transações, preservando arrays nulos ou vazios
+		{"$sort": bson.M{"ultimas_transacoes.realizada_em": -1}},                               // Ordenar as transações por data em ordem decrescente
 		{"$group": bson.M{
 			"_id":                "$_id",
 			"saldo":              bson.M{"$first": "$saldo"},
@@ -165,6 +155,18 @@ func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, er
 		if err != nil {
 			return domain.Extrato{}, err
 		}
+	}
+
+	// Se não houver resultados, retorna um Extrato com os valores padrão
+	if extrato.Extrato.UltimasTransacoes == nil {
+		return domain.Extrato{
+			Saldo: domain.Saldo{
+				Total:       extrato.Extrato.Saldo.Total,
+				DataExtrato: extrato.Extrato.Saldo.DataExtrato,
+				Limite:      extrato.Extrato.Saldo.Limite,
+			},
+			UltimasTransacoes: nil,
+		}, nil
 	}
 
 	return extrato.Extrato, nil
