@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
@@ -43,6 +44,7 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	}
 	defer session.EndSession(ctx)
 
+	// Inicia a transação
 	err = session.StartTransaction()
 	if err != nil {
 		return domain.TransacaoResponse{}, err
@@ -65,37 +67,47 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 		newBalance = c.Saldo - int64(t.Valor)
 	}
 
-	if (newBalance + c.Limite) < 0 {
+	if (newBalance + int64(c.Limite)) < 0 {
 		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, LimitErr
 	}
 
-	_, err = clienteCollection.UpdateOne(ctx, bson.M{"id": t.ClienteID}, bson.M{"$set": bson.M{"saldo": newBalance}})
+	// Atualiza o saldo do cliente dentro da transação
+	update := bson.M{"$set": bson.M{"saldo": newBalance}}
+	opts := options.FindOneAndUpdate().SetUpsert(true)
+	result := clienteCollection.FindOneAndUpdate(ctx, bson.M{"id": t.ClienteID}, update, opts)
+	if result.Err() != nil {
+		session.AbortTransaction(ctx)
+		return domain.TransacaoResponse{}, result.Err()
+	}
+
+	// Insere a transação dentro da transação
+	_, err = transacaoCollection.InsertOne(
+		ctx,
+		bson.M{
+			"cliente_id":   t.ClienteID,
+			"valor":        t.Valor,
+			"tipo":         t.Tipo,
+			"descricao":    t.Descricao,
+			"realizada_em": primitive.NewDateTimeFromTime(time.Now().UTC()),
+		},
+	)
 	if err != nil {
 		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, err
 	}
 
-	_, err = transacaoCollection.InsertOne(ctx, bson.M{
-		"cliente_id":   t.ClienteID,
-		"valor":        t.Valor,
-		"tipo":         t.Tipo,
-		"descricao":    t.Descricao,
-		"realizada_em": primitive.NewDateTimeFromTime(time.Now().UTC()),
-	})
-	if err != nil {
-		session.AbortTransaction(ctx)
-		return domain.TransacaoResponse{}, err
-	}
-
+	// Commita a transação
 	err = session.CommitTransaction(ctx)
 	if err != nil {
 		return domain.TransacaoResponse{}, err
 	}
+
 	response := domain.TransacaoResponse{
 		Saldo:  newBalance,
 		Limite: c.Limite,
 	}
+
 	return response, nil
 }
 
