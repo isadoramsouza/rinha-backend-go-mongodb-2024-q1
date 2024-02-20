@@ -39,9 +39,6 @@ func NewRepository(db *mongo.Client) Repository {
 }
 
 func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error) {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-
 	session, err := r.db.StartSession()
 	if err != nil {
 		return domain.TransacaoResponse{}, err
@@ -59,7 +56,7 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 
 	var c domain.Cliente
 	err = clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
-	if err != nil {
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, err
 	}
@@ -77,12 +74,13 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	}
 
 	// Atualiza o saldo do cliente dentro da transação
+	filter := bson.M{"id": t.ClienteID}
 	update := bson.M{"$set": bson.M{"saldo": newBalance}}
-	opts := options.FindOneAndUpdate().SetUpsert(true)
-	result := clienteCollection.FindOneAndUpdate(ctx, bson.M{"id": t.ClienteID}, update, opts)
-	if result.Err() != nil {
+	opts := options.Update().SetUpsert(true)
+	_, err = clienteCollection.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
 		session.AbortTransaction(ctx)
-		return domain.TransacaoResponse{}, result.Err()
+		return domain.TransacaoResponse{}, err
 	}
 
 	// Insere a transação dentro da transação
@@ -128,6 +126,11 @@ func (r *repository) GetBalance(ctx context.Context, id int) (domain.Cliente, er
 }
 
 func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, error) {
+	cliente, err := r.GetBalance(ctx, id)
+	if err != nil {
+		return domain.Extrato{}, err
+	}
+
 	pipeline := bson.A{
 		bson.D{{"$match", bson.M{"cliente_id": id}}},
 		bson.D{{"$sort", bson.M{"realizada_em": -1}}},
@@ -154,11 +157,6 @@ func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, er
 	}
 
 	if err := cur.Err(); err != nil {
-		return domain.Extrato{}, err
-	}
-
-	cliente, err := r.GetBalance(ctx, id)
-	if err != nil {
 		return domain.Extrato{}, err
 	}
 
