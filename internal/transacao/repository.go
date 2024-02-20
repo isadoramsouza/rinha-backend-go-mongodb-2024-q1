@@ -8,7 +8,6 @@ import (
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
@@ -37,37 +36,43 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	transacaoCollection := r.db.Database(DB_NAME).Collection("transacoes")
 	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
 
-	var update bson.M
-	if t.Tipo == "c" {
-		update = bson.M{
-			"$inc": bson.M{"saldo": t.Valor},
-		}
-	} else {
-		update = bson.M{
-			"$inc": bson.M{"saldo": -t.Valor},
-		}
-	}
-
-	options := options.FindOneAndUpdate().SetReturnDocument(options.After)
-	var updatedCliente domain.Cliente
-	err := clienteCollection.FindOneAndUpdate(ctx, bson.M{"id": t.ClienteID}, update, options).Decode(&updatedCliente)
+	// Busca o cliente para verificar seu saldo atual e limite disponível
+	var c domain.Cliente
+	err := clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
 	if err != nil {
 		return domain.TransacaoResponse{}, err
 	}
 
-	newBalance := updatedCliente.Saldo
-	if (newBalance + int64(updatedCliente.Limite)) < 0 {
+	// Calcula o novo saldo com base no tipo de transação
+	var newBalance int64
+	if t.Tipo == "c" {
+		newBalance = c.Saldo + int64(t.Valor)
+	} else {
+		newBalance = c.Saldo - int64(t.Valor)
+	}
+
+	// Verifica se a transação viola a restrição do limite disponível
+	if t.Tipo == "d" && (newBalance < -c.Limite) {
 		return domain.TransacaoResponse{}, LimitErr
 	}
 
+	// Atualiza o saldo do cliente e insere a transação em uma única operação de banco de dados
+	update := bson.M{"$set": bson.M{"saldo": newBalance}}
+	_, err = clienteCollection.UpdateOne(ctx, bson.M{"id": t.ClienteID}, update)
+	if err != nil {
+		return domain.TransacaoResponse{}, err
+	}
+
+	// Insere a transação na coleção de transações
 	_, err = transacaoCollection.InsertOne(ctx, t)
 	if err != nil {
 		return domain.TransacaoResponse{}, err
 	}
 
+	// Retorna a resposta da transação
 	response := domain.TransacaoResponse{
 		Saldo:  newBalance,
-		Limite: updatedCliente.Limite,
+		Limite: c.Limite,
 	}
 
 	return response, nil
