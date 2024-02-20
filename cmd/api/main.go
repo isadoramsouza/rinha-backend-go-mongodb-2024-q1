@@ -6,14 +6,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/cmd/api/routes"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+var (
+	DB_NAME = "rinhabackenddb"
 )
 
 func main() {
 
 	//mongoURI := os.Getenv("MONGODB_URI")
 	mongoURI := "mongodb://localhost:27017/rinhabackenddb?socketTimeoutMS=360000&connectTimeoutMS=360000&maxPoolSize=10&minPoolSize=5"
+
 	db, err := mongo.NewClient(options.Client().ApplyURI(mongoURI))
 	CheckError(err)
 
@@ -24,6 +30,12 @@ func main() {
 	defer db.Disconnect(ctx)
 
 	fmt.Println("Connected to MongoDB!")
+
+	clientesCollection := db.Database(DB_NAME).Collection("clientes")
+	transacaoCollection := db.Database(DB_NAME).Collection("transacoes")
+	clientesCollection.Indexes().CreateOne(context.TODO(), mongo.IndexModel{Keys: bson.D{{"id", 1}}})
+	transacaoCollection.Indexes().
+		CreateOne(context.TODO(), mongo.IndexModel{Keys: bson.D{{"cliente_id", 1}, {"realizada_em", 1}}})
 
 	eng := gin.Default()
 

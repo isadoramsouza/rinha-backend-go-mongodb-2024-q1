@@ -7,7 +7,6 @@ import (
 
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -59,13 +58,7 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 		return domain.TransacaoResponse{}, err
 	}
 
-	_, err = transacaoCollection.InsertOne(ctx, bson.M{
-		"cliente_id":   t.ClienteID,
-		"valor":        t.Valor,
-		"tipo":         t.Tipo,
-		"descricao":    t.Descricao,
-		"realizada_em": primitive.NewDateTimeFromTime(time.Now().UTC()),
-	})
+	_, err = transacaoCollection.InsertOne(ctx, t)
 	if err != nil {
 		return domain.TransacaoResponse{}, err
 	}

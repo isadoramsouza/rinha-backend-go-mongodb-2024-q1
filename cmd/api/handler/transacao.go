@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
@@ -67,10 +68,11 @@ func (t *TransacaoController) CreateTransaction() gin.HandlerFunc {
 		}
 
 		newTransacao := domain.Transacao{
-			ClienteID: id,
-			Tipo:      input.Tipo,
-			Descricao: input.Descricao,
-			Valor:     input.Valor,
+			ClienteID:   id,
+			Tipo:        input.Tipo,
+			Descricao:   input.Descricao,
+			Valor:       input.Valor,
+			RealizadaEm: time.Now().UTC(),
 		}
 
 		response, err := t.transacaoService.CreateTransaction(c, newTransacao)
