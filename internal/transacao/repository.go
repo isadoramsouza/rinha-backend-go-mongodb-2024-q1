@@ -57,6 +57,7 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 		return domain.TransacaoResponse{}, err
 	}
 
+	// Calcula o novo saldo
 	var newBalance int64
 	if t.Tipo == "c" {
 		newBalance = c.Saldo + int64(t.Valor)
@@ -64,26 +65,26 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 		newBalance = c.Saldo - int64(t.Valor)
 	}
 
+	// Verifica se o saldo ultrapassa o limite
 	if (newBalance + int64(c.Limite)) < 0 {
 		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, LimitErr
 	}
 
-	transacoesCliente := c.UltimasTransacoes
-	novaTransacao := domain.UltimaTransacao{
-		Tipo:        t.Tipo,
-		Descricao:   t.Descricao,
-		RealizadaEm: t.RealizadaEm,
-		Valor:       t.Valor,
+	// Atualiza o saldo e adiciona a transação ao array ultimas_transacoes
+	filter := bson.M{"id": t.ClienteID}
+	update := bson.M{
+		"$set": bson.M{"saldo": newBalance},
+		"$push": bson.M{"ultimas_transacoes": bson.M{
+			"tipo":         t.Tipo,
+			"descricao":    t.Descricao,
+			"realizada_em": t.RealizadaEm,
+			"valor":        t.Valor,
+		}},
 	}
 
-	transacoesCliente = append(transacoesCliente, novaTransacao)
-
-	filter := bson.M{"id": t.ClienteID}
-	update := bson.M{"$set": bson.M{"saldo": newBalance, "ultimas_transacoes": transacoesCliente}}
-
-	opts := options.Update().SetUpsert(true)
-	_, err = clienteCollection.UpdateOne(ctx, filter, update, opts)
+	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
+	err = clienteCollection.FindOneAndUpdate(ctx, filter, update, opts).Decode(&c)
 	if err != nil {
 		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, err
