@@ -28,7 +28,8 @@ type Repository interface {
 }
 
 type repository struct {
-	db *mongo.Client
+	db   *mongo.Client
+	lock sync.Mutex
 }
 
 func NewRepository(db *mongo.Client) Repository {
@@ -38,6 +39,9 @@ func NewRepository(db *mongo.Client) Repository {
 }
 
 func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	session, err := r.db.StartSession()
 	if err != nil {
 		return domain.TransacaoResponse{}, err
