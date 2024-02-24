@@ -34,7 +34,9 @@ func main() {
 	clientesCollection := db.Database(DB_NAME).Collection("clientes")
 	clientesCollection.Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.M{"id": 1}},
-		{Keys: bson.M{"ultimas_transacoes.realizada_em": -1}},
+		{Keys: bson.M{"disponivel": 1}},
+		{Keys: bson.M{"saldo": 1}},
+		{Keys: bson.M{"ultimas_transacoes": -1}},
 	})
 	eng := gin.Default()
 

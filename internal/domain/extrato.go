@@ -21,5 +21,6 @@ type Saldo struct {
 }
 
 type Result struct {
-	Saldo int64 `bson:"saldo"`
+	Saldo  int64 `bson:"saldo"`
+	Limite int64 `bson:"limite"`
 }
