@@ -2,14 +2,25 @@ package transacao
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"sync"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+var limites map[int64]int64 = map[int64]int64{
+	1: 100000,
+	2: 80000,
+	3: 1000000,
+	4: 10000000,
+	5: 500000,
+}
 
 var (
 	ErrNotFound = errors.New("cliente not found")
@@ -17,16 +28,13 @@ var (
 	DB_NAME     = "rinhabackenddb"
 )
 
-var mutex sync.Mutex
-
 type Repository interface {
 	SaveTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error)
 	GetExtrato(ctx context.Context, id int) (domain.Extrato, error)
 }
 
 type repository struct {
-	db   *mongo.Client
-	lock sync.Mutex
+	db *mongo.Client
 }
 
 func NewRepository(db *mongo.Client) Repository {
@@ -37,126 +45,94 @@ func NewRepository(db *mongo.Client) Repository {
 
 func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error) {
 	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
+	transacaoStr := fmt.Sprintf("{\"valor\":%d,\"tipo\":\"%s\",\"descricao\":\"%s\",\"realizada_em\":\"%s\"}", t.Valor, t.Tipo, t.Descricao, time.Now().Format(time.RFC3339))
+	var opVal int64
+	var filter bson.D
 
-	var c domain.Cliente
-	err := clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
-	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-		return domain.TransacaoResponse{}, err
-	}
-
-	// Calcula o novo saldo
-	var newBalance int64
-	if t.Tipo == "c" {
-		newBalance = c.Saldo + int64(t.Valor)
+	if t.Tipo == "d" {
+		opVal = -t.Valor
+		filter = bson.D{{"id", t.ClienteID}, {"disponivel", bson.D{{"$gte", t.Valor}}}}
 	} else {
-		newBalance = c.Saldo - int64(t.Valor)
+		opVal = t.Valor
+		filter = bson.D{{"id", t.ClienteID}}
 	}
 
-	// Verifica se o saldo ultrapassa o limite
-	if (newBalance + int64(c.Limite)) < 0 {
-		return domain.TransacaoResponse{}, LimitErr
+	set := bson.D{
+		{"$set", bson.D{
+			{"disponivel", bson.D{
+				{"$add", []interface{}{"$disponivel", opVal}},
+			}},
+			{"saldo", bson.D{
+				{"$add", []interface{}{"$saldo", opVal}},
+			}},
+			{"ultimas_transacoes", bson.D{
+				{"$concatArrays", []interface{}{[]interface{}{transacaoStr}, bson.D{
+					{"$slice", []interface{}{"$ultimas_transacoes", 9}},
+				}}},
+			}},
+		}},
 	}
 
-	// Converte a nova transação em uma struct UltimaTransacao
-	novaTransacao := domain.UltimaTransacao{
-		Tipo:        t.Tipo,
-		Descricao:   t.Descricao,
-		RealizadaEm: t.RealizadaEm,
-		Valor:       t.Valor,
+	after := options.After
+	opts := options.FindOneAndUpdateOptions{
+		Projection:     bson.D{{"saldo", 1}},
+		ReturnDocument: &after,
 	}
 
-	// Adiciona a nova transação ao início do array
-	c.UltimasTransacoes = append([]domain.UltimaTransacao{novaTransacao}, c.UltimasTransacoes...)
-
-	// Mantém apenas as últimas 10 transações se houver mais de 10
-	if len(c.UltimasTransacoes) > 10 {
-		c.UltimasTransacoes = c.UltimasTransacoes[:10]
-	}
-
-	// Atualiza o saldo e as últimas transações no documento "clientes"
-	_, err = clienteCollection.UpdateOne(
-		ctx,
-		bson.M{"id": t.ClienteID},
-		bson.M{
-			"$set": bson.M{"saldo": newBalance, "ultimas_transacoes": c.UltimasTransacoes},
-		},
-	)
+	result := &domain.Result{}
+	err := clienteCollection.FindOneAndUpdate(context.TODO(), filter, mongo.Pipeline{set}, &opts).Decode(&result)
 	if err != nil {
+		if err.Error() == "mongo: no documents in result" {
+			return domain.TransacaoResponse{}, LimitErr
+		}
 		return domain.TransacaoResponse{}, err
 	}
 
 	response := domain.TransacaoResponse{
-		Saldo:  newBalance,
-		Limite: c.Limite,
+		Saldo:  result.Saldo,
+		Limite: limites[int64(t.ClienteID)],
 	}
-
 	return response, nil
 }
 
 func (r *repository) GetExtrato(ctx context.Context, id int) (domain.Extrato, error) {
-	// Define a data do extrato
-	dataExtrato := time.Now().UTC()
+	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
 
-	// Define a pipeline de agregação para buscar as últimas transações e informações do cliente
-	pipeline := []bson.M{
-		{"$match": bson.M{"id": id}},
-		{"$lookup": bson.M{
-			"from":         "clientes",
-			"localField":   "id",
-			"foreignField": "id",
-			"as":           "cliente",
-		}},
-		{"$unwind": "$cliente"},
-		{"$project": bson.M{
-			"saldo": bson.M{
-				"total":        "$cliente.saldo",
-				"data_extrato": bson.M{"$toDate": dataExtrato},
-				"limite":       "$cliente.limite",
-			},
-			"ultimas_transacoes": "$cliente.ultimas_transacoes",
-		}},
-		{"$unwind": bson.M{"path": "$ultimas_transacoes", "preserveNullAndEmptyArrays": true}}, // Unwind das transações, preservando arrays nulos ou vazios
-		{"$sort": bson.M{"ultimas_transacoes.realizada_em": -1}},                               // Ordenar as transações por data em ordem decrescente
-		{"$group": bson.M{
-			"_id":                "$_id",
-			"saldo":              bson.M{"$first": "$saldo"},
-			"ultimas_transacoes": bson.M{"$push": "$ultimas_transacoes"},
-		}},
-		{"$project": bson.M{
-			"extrato": bson.M{
-				"saldo":              "$saldo",
-				"ultimas_transacoes": bson.M{"$slice": []interface{}{"$ultimas_transacoes", 10}}, // Limitar a 10 transações
-			},
-		}},
+	opts := options.FindOneOptions{
+		Projection: bson.D{
+			{"saldo", 1},
+			{"ultimas_transacoes", 1},
+		},
 	}
 
-	cursor, err := r.db.Database(DB_NAME).Collection("clientes").Aggregate(ctx, pipeline)
+	var result struct {
+		Saldo             int64    `json:"saldo" bson:"saldo"`
+		UltimasTransacoes []string `bson:"ultimas_transacoes" json:"ultimas_transacoes"`
+	}
+
+	extrato := &result
+
+	filter := bson.D{{"id", id}}
+	err := clienteCollection.FindOne(context.TODO(), filter, &opts).Decode(extrato)
 	if err != nil {
 		return domain.Extrato{}, err
 	}
-	defer cursor.Close(ctx)
 
-	var extrato struct {
-		Extrato domain.Extrato `bson:"extrato"`
-	}
-	if cursor.Next(ctx) {
-		err := cursor.Decode(&extrato)
-		if err != nil {
-			return domain.Extrato{}, err
-		}
+	var ultimasTransacoes []domain.UltimaTransacao
+
+	err = json.Unmarshal([]byte(fmt.Sprintf("[%s]", strings.Join(result.UltimasTransacoes, ","))), &ultimasTransacoes)
+	if err != nil {
+		return domain.Extrato{}, err
 	}
 
-	// Simplified check for result presence
-	if extrato.Extrato.UltimasTransacoes == nil {
-		return domain.Extrato{
-			Saldo: domain.Saldo{
-				Total:       extrato.Extrato.Saldo.Total,
-				DataExtrato: extrato.Extrato.Saldo.DataExtrato,
-				Limite:      extrato.Extrato.Saldo.Limite,
-			},
-			UltimasTransacoes: nil,
-		}, nil
+	response := domain.Extrato{
+		Saldo: domain.Saldo{
+			Total:       result.Saldo,
+			Limite:      limites[int64(id)],
+			DataExtrato: time.Now().Format(time.RFC3339),
+		},
+		UltimasTransacoes: ultimasTransacoes,
 	}
 
-	return extrato.Extrato, nil
+	return response, nil
 }

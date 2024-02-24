@@ -4,7 +4,7 @@ import "time"
 
 type Extrato struct {
 	Saldo             Saldo             `json:"saldo" bson:"saldo"`
-	UltimasTransacoes []UltimaTransacao `json:"ultimas_transacoes" bson:"ultimas_transacoes"`
+	UltimasTransacoes []UltimaTransacao `bson:"ultimas_transacoes" json:"ultimas_transacoes"`
 }
 
 type UltimaTransacao struct {
@@ -15,7 +15,11 @@ type UltimaTransacao struct {
 }
 
 type Saldo struct {
-	Total       int64     `json:"total" bson:"total"`
-	DataExtrato time.Time `json:"data_extrato" bson:"data_extrato"`
-	Limite      int64     `json:"limite" bson:"limite"`
+	Total       int64  `json:"total" bson:"total"`
+	DataExtrato string `json:"data_extrato" bson:"data_extrato"`
+	Limite      int64  `json:"limite" bson:"limite"`
+}
+
+type Result struct {
+	Saldo int64 `bson:"saldo"`
 }
