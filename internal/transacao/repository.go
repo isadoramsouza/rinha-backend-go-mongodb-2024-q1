@@ -46,7 +46,11 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
 
 	valorTransacao := t.Valor
-	transacaoStr := fmt.Sprintf("{\"valor\":%d,\"tipo\":\"%s\",\"descricao\":\"%s\",\"realizada_em\":\"%s\"}", t.Valor, t.Tipo, t.Descricao, time.Now().Format(time.RFC3339))
+
+	transacaoJson, err := json.Marshal(t)
+	if err != nil {
+		return domain.TransacaoResponse{}, err
+	}
 
 	filter := bson.M{"id": t.ClienteID}
 	if t.Tipo == "d" {
@@ -63,7 +67,7 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 				{"$add", []interface{}{"$saldo", valorTransacao}},
 			}},
 			{"ultimas_transacoes", bson.D{
-				{"$concatArrays", []interface{}{[]interface{}{transacaoStr}, bson.D{
+				{"$concatArrays", []interface{}{[]interface{}{string(transacaoJson)}, bson.D{
 					{"$slice", []interface{}{"$ultimas_transacoes", 9}},
 				}}},
 			}},
@@ -76,7 +80,7 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 		ReturnDocument: &after,
 	}
 	result := &domain.Result{}
-	err := clienteCollection.FindOneAndUpdate(ctx, filter, mongo.Pipeline{update}, &opts).Decode(&result)
+	err = clienteCollection.FindOneAndUpdate(ctx, filter, mongo.Pipeline{update}, &opts).Decode(&result)
 	if err != nil {
 		if err.Error() == "mongo: no documents in result" {
 			return domain.TransacaoResponse{}, LimitErr
