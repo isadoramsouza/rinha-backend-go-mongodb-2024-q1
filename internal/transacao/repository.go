@@ -9,7 +9,6 @@ import (
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
@@ -37,23 +36,11 @@ func NewRepository(db *mongo.Client) Repository {
 }
 
 func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error) {
-	session, err := r.db.StartSession()
-	if err != nil {
-		return domain.TransacaoResponse{}, err
-	}
-	defer session.EndSession(ctx)
-
-	err = session.StartTransaction()
-	if err != nil {
-		return domain.TransacaoResponse{}, err
-	}
-
 	clienteCollection := r.db.Database(DB_NAME).Collection("clientes")
 
 	var c domain.Cliente
-	err = clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
+	err := clienteCollection.FindOne(ctx, bson.M{"id": t.ClienteID}).Decode(&c)
 	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, err
 	}
 
@@ -67,30 +54,33 @@ func (r *repository) SaveTransaction(ctx context.Context, t domain.Transacao) (d
 
 	// Verifica se o saldo ultrapassa o limite
 	if (newBalance + int64(c.Limite)) < 0 {
-		session.AbortTransaction(ctx)
 		return domain.TransacaoResponse{}, LimitErr
 	}
 
-	// Atualiza o saldo e adiciona a transação ao array ultimas_transacoes
-	filter := bson.M{"id": t.ClienteID}
-	update := bson.M{
-		"$set": bson.M{"saldo": newBalance},
-		"$push": bson.M{"ultimas_transacoes": bson.M{
-			"tipo":         t.Tipo,
-			"descricao":    t.Descricao,
-			"realizada_em": t.RealizadaEm,
-			"valor":        t.Valor,
-		}},
+	// Converte a nova transação em uma struct UltimaTransacao
+	novaTransacao := domain.UltimaTransacao{
+		Tipo:        t.Tipo,
+		Descricao:   t.Descricao,
+		RealizadaEm: t.RealizadaEm,
+		Valor:       t.Valor,
 	}
 
-	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
-	err = clienteCollection.FindOneAndUpdate(ctx, filter, update, opts).Decode(&c)
-	if err != nil {
-		session.AbortTransaction(ctx)
-		return domain.TransacaoResponse{}, err
+	// Adiciona a nova transação ao início do array
+	c.UltimasTransacoes = append([]domain.UltimaTransacao{novaTransacao}, c.UltimasTransacoes...)
+
+	// Mantém apenas as últimas 10 transações se houver mais de 10
+	if len(c.UltimasTransacoes) > 10 {
+		c.UltimasTransacoes = c.UltimasTransacoes[:10]
 	}
 
-	err = session.CommitTransaction(ctx)
+	// Atualiza o saldo e as últimas transações no documento "clientes"
+	_, err = clienteCollection.UpdateOne(
+		ctx,
+		bson.M{"id": t.ClienteID},
+		bson.M{
+			"$set": bson.M{"saldo": newBalance, "ultimas_transacoes": c.UltimasTransacoes},
+		},
+	)
 	if err != nil {
 		return domain.TransacaoResponse{}, err
 	}
