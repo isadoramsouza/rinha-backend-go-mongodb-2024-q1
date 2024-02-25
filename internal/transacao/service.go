@@ -21,11 +21,21 @@ func NewService(r Repository) Service {
 	}
 }
 
+var semaphore = make(chan struct{}, 20)
+
 func (s *transacaoService) CreateTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error) {
 	responseChan := make(chan domain.TransacaoResponse)
 	errChan := make(chan error)
 
+	// Adquirindo o semáforo
+	semaphore <- struct{}{}
+
 	go func() {
+		defer func() {
+			// Liberando o semáforo quando a goroutine terminar
+			<-semaphore
+		}()
+
 		response, err := s.repository.SaveTransaction(ctx, t)
 		if err != nil {
 			errChan <- err
@@ -46,7 +56,15 @@ func (s *transacaoService) GetExtrato(ctx context.Context, id int) (domain.Extra
 	extratoChan := make(chan domain.Extrato)
 	errChan := make(chan error)
 
+	// Adquirindo o semáforo
+	semaphore <- struct{}{}
+
 	go func() {
+		defer func() {
+			// Liberando o semáforo quando a goroutine terminar
+			<-semaphore
+		}()
+
 		extrato, err := s.repository.GetExtrato(ctx, id)
 		if err != nil {
 			errChan <- err
