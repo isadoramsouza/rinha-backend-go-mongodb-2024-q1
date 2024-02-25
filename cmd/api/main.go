@@ -40,7 +40,7 @@ func main() {
 
 	fmt.Println("Connected to MongoDB!")
 
-	eng := gin.Default()
+	eng := gin.New()
 
 	router := routes.NewRouter(eng, db)
 	router.MapRoutes()
