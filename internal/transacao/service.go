@@ -22,13 +22,43 @@ func NewService(r Repository) Service {
 }
 
 func (s *transacaoService) CreateTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error) {
-	response, err := s.repository.SaveTransaction(ctx, t)
+	responseChan := make(chan domain.TransacaoResponse)
+	errChan := make(chan error)
 
-	return response, err
+	go func() {
+		response, err := s.repository.SaveTransaction(ctx, t)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		responseChan <- response
+	}()
+
+	select {
+	case response := <-responseChan:
+		return response, nil
+	case err := <-errChan:
+		return domain.TransacaoResponse{}, err
+	}
 }
 
 func (s *transacaoService) GetExtrato(ctx context.Context, id int) (domain.Extrato, error) {
-	extrato, err := s.repository.GetExtrato(ctx, id)
+	extratoChan := make(chan domain.Extrato)
+	errChan := make(chan error)
 
-	return extrato, err
+	go func() {
+		extrato, err := s.repository.GetExtrato(ctx, id)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		extratoChan <- extrato
+	}()
+
+	select {
+	case extrato := <-extratoChan:
+		return extrato, nil
+	case err := <-errChan:
+		return domain.Extrato{}, err
+	}
 }
