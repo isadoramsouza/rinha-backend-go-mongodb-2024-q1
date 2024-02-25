@@ -23,7 +23,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.30'
+          cpus: '0.25'
           memory: '45MB'
 
   api2:
@@ -46,7 +46,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.30'
+          cpus: '0.25'
           memory: '45MB'
 
   nginx:
@@ -62,8 +62,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.2'
-          memory: '30MB'
+          cpus: '0.25'
+          memory: '35MB'
 
   db:
     image: mongo:7-jammy
@@ -75,8 +75,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.70'
-          memory: '430MB'
+          cpus: '0.75'
+          memory: '425MB'
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 5s
