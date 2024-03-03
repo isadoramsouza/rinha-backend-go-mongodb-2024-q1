@@ -27,12 +27,16 @@ func main() {
 	CheckError(err)
 
 	clientesCollection := db.Database(DB_NAME).Collection("clientes")
-	clientesCollection.Indexes().CreateMany(ctx, []mongo.IndexModel{
-		{Keys: bson.M{"id": 1}},
-		{Keys: bson.M{"disponivel": 1}},
-		{Keys: bson.M{"saldo": 1}},
-		{Keys: bson.M{"ultimas_transacoes": -1}},
-	})
+
+	_, err = clientesCollection.Indexes().CreateOne(
+		context.TODO(),
+		mongo.IndexModel{Keys: bson.D{
+			{Key: "id", Value: 1},
+			{Key: "disponivel", Value: 1},
+			{Key: "saldo", Value: 1},
+			{Key: "ultimas_transacoes", Value: -1},
+		}},
+	)
 
 	CheckError(err)
 
