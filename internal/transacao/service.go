@@ -2,6 +2,8 @@ package transacao
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
 )
@@ -24,61 +26,63 @@ func NewService(r Repository) Service {
 }
 
 func (s *transacaoService) CreateTransaction(ctx context.Context, t domain.Transacao) (domain.TransacaoResponse, error) {
-	responseChan := make(chan domain.TransacaoResponse, 1) // Use um buffer para evitar bloqueios desnecessários
-	errChan := make(chan error, 1)                         // Use um buffer para evitar bloqueios desnecessários
+	var (
+		response domain.TransacaoResponse
+		err      error
+		wg       sync.WaitGroup
+	)
 
 	select {
 	case s.semaphore <- struct{}{}:
-		go func() {
-			defer func() {
-				<-s.semaphore
-			}()
+		wg.Add(1)
+		defer func() {
+			<-s.semaphore
+			wg.Done()
+		}()
 
-			response, err := s.repository.SaveTransaction(ctx, t)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			responseChan <- response
+		ctx, cancel := context.WithTimeout(ctx, time.Second*5) // Defina um tempo limite
+		defer cancel()
+
+		go func() {
+			defer wg.Done()
+			response, err = s.repository.SaveTransaction(ctx, t)
 		}()
 	case <-ctx.Done():
-		return domain.TransacaoResponse{}, ctx.Err() // Trate o cancelamento do contexto
+		return domain.TransacaoResponse{}, ctx.Err()
 	}
 
-	select {
-	case response := <-responseChan:
-		return response, nil
-	case err := <-errChan:
-		return domain.TransacaoResponse{}, err
-	}
+	wg.Wait()
+
+	return response, err
 }
 
 func (s *transacaoService) GetExtrato(ctx context.Context, id int) (domain.Extrato, error) {
-	extratoChan := make(chan domain.Extrato, 1) // Use um buffer para evitar bloqueios desnecessários
-	errChan := make(chan error, 1)              // Use um buffer para evitar bloqueios desnecessários
+	var (
+		extrato domain.Extrato
+		err     error
+		wg      sync.WaitGroup
+	)
 
 	select {
 	case s.semaphore <- struct{}{}:
-		go func() {
-			defer func() {
-				<-s.semaphore
-			}()
+		wg.Add(1)
+		defer func() {
+			<-s.semaphore
+			wg.Done()
+		}()
 
-			extrato, err := s.repository.GetExtrato(ctx, id)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			extratoChan <- extrato
+		ctx, cancel := context.WithTimeout(ctx, time.Second*5) // Defina um tempo limite
+		defer cancel()
+
+		go func() {
+			defer wg.Done()
+			extrato, err = s.repository.GetExtrato(ctx, id)
 		}()
 	case <-ctx.Done():
-		return domain.Extrato{}, ctx.Err() // Trate o cancelamento do contexto
+		return domain.Extrato{}, ctx.Err()
 	}
 
-	select {
-	case extrato := <-extratoChan:
-		return extrato, nil
-	case err := <-errChan:
-		return domain.Extrato{}, err
-	}
+	wg.Wait()
+
+	return extrato, err
 }
