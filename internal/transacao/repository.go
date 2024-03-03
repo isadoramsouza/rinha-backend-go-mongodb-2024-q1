@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
+	"github.com/isadoramsouza/rinha-backend-go-mongodb-2024-q1/internal/domain"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

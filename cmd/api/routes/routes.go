@@ -2,8 +2,8 @@ package routes
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/isadoramsouza/rinha-backend-go-2024-q1/cmd/api/handler"
-	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/transacao"
+	"github.com/isadoramsouza/rinha-backend-go-mongodb-2024-q1/cmd/api/handler"
+	"github.com/isadoramsouza/rinha-backend-go-mongodb-2024-q1/internal/transacao"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 

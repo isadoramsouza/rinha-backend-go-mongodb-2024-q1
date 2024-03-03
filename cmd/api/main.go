@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/isadoramsouza/rinha-backend-go-2024-q1/cmd/api/routes"
+	"github.com/isadoramsouza/rinha-backend-go-mongodb-2024-q1/cmd/api/routes"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

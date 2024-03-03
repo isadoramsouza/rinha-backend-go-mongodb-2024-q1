@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/domain"
-	transacao "github.com/isadoramsouza/rinha-backend-go-2024-q1/internal/transacao"
 	"github.com/isadoramsouza/rinha-backend-go-2024-q1/pkg/web"
+	"github.com/isadoramsouza/rinha-backend-go-mongodb-2024-q1/internal/domain"
+	transacao "github.com/isadoramsouza/rinha-backend-go-mongodb-2024-q1/internal/transacao"
 )
 
 var (
